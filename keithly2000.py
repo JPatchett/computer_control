@@ -1,8 +1,10 @@
 from enum import Enum
 import numpy as np
+import pandas as pd
 import visa
 import misc
 from time import sleep
+import re
 
 #Class for operating the Keithley 2000
 
@@ -77,8 +79,10 @@ class SRC_I_RAN(Enum):
 
 class keithly:
 
-
+    #####################
     #### Constructor ####
+    #####################
+
     #address:GPIB address of the keithly
     #rm: resource manager
     def __init__(self, address, rm, reset = True):
@@ -105,6 +109,14 @@ class keithly:
         self.__compl = "c"
         self.__output = False
 
+
+    ####################################
+    ####################################
+    ## Basic functions for programming #
+    ##### the Kiethly's parameters #####
+    ####################################
+    ####################################
+
     #Set the source type
     def source(self, source_type): 
 
@@ -112,7 +124,6 @@ class keithly:
             
             #Only interested in the first 4 letters
             source_type = source_type[:4].upper()
-            print("boods")
             try:
                 self.keith.write(":SOURCE:FUNC "+source_type)
                 self.keith.write(":SOUR:"+source_type+":MODE FIXED")
@@ -226,9 +237,32 @@ class keithly:
             except:
                 print("Setting the measurement (Currant) range failed")
 
-    def complianc(self, comp):
+    #Set the compliance
+    def set_complianc(self, comp):
 
         self.keith.write(":SENS:CURR:PROT "+str(comp))
+
+    #the source delay is the time between the output being turned on, and the measurmenet being taken
+    def set_source_delay(self, SDM):
+        #SDM = time in miliseconds or true/false for auto delays
+
+        #set auto-delay on/off
+        if(isinstance(SDM, bool)):
+            if(SDM is True or SDM.upper() == "ON"): 
+                try:
+                    self.keith.write(":SOUR:DEL:AUTO ON") 
+                except:
+                    print("Could not set-auto delay")    
+            elif(SDM is False or SDM.upper() == "OFF"):
+                try:
+                    self.keith.write(":SOUR:DEL:AUTO OFF")
+                except:
+                    print("Could not set-auto delay")    
+        else:
+            try:
+                self.keith.write(":SOUR:DEL "+str(SDM/1000))
+            except:
+                print("Could not set delay to "+SDM+" ms")
 
     #Set the source range
     def src_range(self, src_range):
@@ -274,16 +308,34 @@ class keithly:
         except:
             print("Could not change auto-zero")
 
-    def do(self):
-        self.keith.write("initiate")
-        self.keith.assert_trigger()
-        self.keith.wait_for_srq()
+    #Read the data and convert to a numpy array of floats
+    def read_to_arr(self):
 
-        voltages = self.keith.query_ascii_values("trace:data?")
-        print(voltages)
+        try:
+        
+            result = self.keith.query(":READ?")
+            search = re.findall(r'[+-]\d\.[\d]*E[+-]\d*', result)
 
+            data = np.empty(len(search))
+
+            for i, found in enumerate(search):
+
+                data[i] = float(found)
+
+            return data
+        except:
+            print("Could no read the device")
+            return None
+        
+
+
+    #Read the data
     def read(self):
-        return self.query(":READ?")
+        try:
+            return self.keith.query(":READ?")
+        except:
+            print("Could not read the device")
+
 
     #Generic write command
     #Don't use if possible as it won't update the parameters
@@ -297,7 +349,7 @@ class keithly:
     #Generic query command
     def query(self, command):
         try:
-            self.keith.query(command)
+            return self.keith.query(str(command))
         except:
             print("Not a valid command or could not communicate with Keithly")
 
@@ -305,7 +357,10 @@ class keithly:
     def update_params(self):
         print("TODO")
 
-    ##Getters
+    ###################################
+    ############ Getters ##############
+    ###################################
+
     def get_src_type(self):
         return self.__src_type
     
@@ -326,3 +381,57 @@ class keithly:
 
     def get_ouput(self):
         return self.__output
+
+    ##################################
+    ######## Sweep programming #######
+    ##################################
+
+    #Simple linear and logarithmic sweeps based on the pre-programmed
+    #sweep functions in the Keithley
+    def linear_sweep(self, start, stop, step, auto  = True, repeats = 1.0, delay = None, pandas = True):
+
+        num = (int)((stop-start)/step +1)*repeats
+
+        try:
+            self.keith.write(":SENS:FUNC:CONC OFF")
+            self.keith.write(":SOUR:"+self.__src_type+":START "+str(start))
+            self.keith.write(":SOUR:"+self.__src_type+":STOP "+str(stop))
+            self.keith.write(":SOUR:"+self.__src_type+":STEP " +str(step))
+
+            self.keith.write(":SOUR:"+self.__src_type+":MODE SWE")
+
+            if(auto is True):
+                self.keith.write(":SOUR:SWE:RANG AUTO")
+
+            self.keith.write(":SOUR:SWE:SPAC LIN")
+
+            print(":TRIG:COUN "+str(num))
+            self.keith.write(":TRIG:COUN "+str(num))
+
+            if(delay != None):
+                self.keith.write(":SOUR:DEL "+str(delay/1000))
+
+
+            #Read the data
+            self.set_output(True)
+            result = self.read_to_arr()
+            self.set_output(False)
+
+            #Return a pandas data frame if true
+            if pandas is True:
+
+                voltage = result[::5]
+                current = result[1::5]
+                dF_result = pd.DataFrame(data = voltage, columns = ['Voltage'])
+                dF_result['Current'] = current
+
+                return  dF_result
+
+            else:
+                return result 
+        
+        except:
+            print("Linear sweep failed")
+
+
+    
