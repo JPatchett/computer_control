@@ -264,16 +264,22 @@ class keithly:
             except:
                 print("Could not set delay to "+SDM+" ms")
 
-    #Set the source range
+    #Set the source range, can take either a true boolean for auto or a float to set it manually
     def src_range(self, src_range):
 
         try:
-            #If they use the enums then attempt to get the float value
-            if(isinstance(src_range, float) is False):
-                src_range = src_range.value
+            #If they use a boolean (and its true), set the range to auto
+            if(isinstance(src_range, bool) is True):
+                if(src_range is True):
+                    self.keith.write(":SOUR:"+self.__src_type+":RANG AUTO")
+                    self.__src_range = "AUTO"
+            else:
+                #If they use the enums then attempt to get the float value
+                if(isinstance(src_range, float) is False):
+                    src_range = src_range.value
 
-            self.keith.write(":SOUR:"+self.__src_type+":RANG "+str(src_range))
-            self.__src_range = src_range
+                self.keith.write(":SOUR:"+self.__src_type+":RANG "+str(src_range))
+                self.__src_range = src_range
         except:
             print("Setting the source range (" +self.__src_type+") failed")
     
@@ -390,27 +396,29 @@ class keithly:
     #sweep functions in the Keithley
     def linear_sweep(self, start, stop, step, auto  = True, repeats = 1.0, delay = None, pandas = True):
 
-        num = (int)((stop-start)/step +1)*repeats
+        num = (int)(abs((stop-start)/step) +1)*repeats
 
         try:
             self.keith.write(":SENS:FUNC:CONC OFF")
             self.keith.write(":SOUR:"+self.__src_type+":START "+str(start))
             self.keith.write(":SOUR:"+self.__src_type+":STOP "+str(stop))
             self.keith.write(":SOUR:"+self.__src_type+":STEP " +str(step))
-
             self.keith.write(":SOUR:"+self.__src_type+":MODE SWE")
+            
+
 
             if(auto is True):
                 self.keith.write(":SOUR:SWE:RANG AUTO")
 
             self.keith.write(":SOUR:SWE:SPAC LIN")
 
-            print(":TRIG:COUN "+str(num))
             self.keith.write(":TRIG:COUN "+str(num))
 
             if(delay != None):
                 self.keith.write(":SOUR:DEL "+str(delay/1000))
 
+
+            del self.keith.timeout #Set it to be 50% bigger than the expected run time based off of delay
 
             #Read the data
             self.set_output(True)
@@ -433,5 +441,9 @@ class keithly:
         except:
             print("Linear sweep failed")
 
-
+    #Allows you to sweep over custom voltage or current ranges
+    #Also supports live plotting
+    #Does this all manually. If you don't need live plotting and want a nice easy linear sweep then linear_sweap() is a better option
+    def custom_sweep(self):
+        print("TODO")
     
